@@ -129,3 +129,188 @@ function rightClickPanel(event, button, sound) {
         document.addEventListener('click', handleOutsideClick);
     }, 0);
 }
+
+// tts
+
+const ttsToggle     = document.getElementById('ttsToggle');
+const ttsPanel      = document.getElementById('ttsPanel');
+const ttsClose      = document.getElementById('ttsClose');
+const ttsText       = document.getElementById('ttsText');
+const ttsVoice      = document.getElementById('ttsVoice');
+const ttsLangFilter = document.getElementById('ttsLangFilter');
+const ttsVolume     = document.getElementById('ttsVolume');
+const ttsRate       = document.getElementById('ttsRate');
+const ttsPitch      = document.getElementById('ttsPitch');
+const ttsVolumeVal  = document.getElementById('ttsVolumeVal');
+const ttsRateVal    = document.getElementById('ttsRateVal');
+const ttsPitchVal   = document.getElementById('ttsPitchVal');
+const ttsSpeak      = document.getElementById('ttsSpeak');
+const ttsPauseBtn   = document.getElementById('ttsPause');
+const ttsResumeBtn  = document.getElementById('ttsResume');
+const ttsStopBtn    = document.getElementById('ttsStop');
+const ttsResetBtn   = document.getElementById('ttsReset');
+const ttsStatus     = document.getElementById('ttsStatus');
+const ttsSpeaking   = document.getElementById('ttsSpeaking');
+const ttsCurrentWord = document.getElementById('ttsCurrentWord');
+
+const synth = window.speechSynthesis;
+let allVoices = [];
+let currentUtterance = null;
+
+ttsToggle.onclick = () => {
+    ttsPanel.classList.toggle('hidden');
+    ttsToggle.classList.toggle('tts-toggle-active');
+};
+ttsClose.onclick = () => {
+    ttsPanel.classList.add('hidden');
+    ttsToggle.classList.remove('tts-toggle-active');
+};
+
+function loadVoices() {
+    allVoices = synth.getVoices();
+    if (!allVoices.length) return;
+
+    const langs = [...new Set(allVoices.map(v => v.lang))].sort();
+    ttsLangFilter.innerHTML = '<option value="">All Languages</option>';
+    langs.forEach(lang => {
+        const opt = document.createElement('option');
+        opt.value = lang;
+        opt.textContent = lang;
+        ttsLangFilter.appendChild(opt);
+    });
+
+    populateVoiceList('');
+}
+
+function populateVoiceList(langFilter) {
+    const filtered = langFilter
+        ? allVoices.filter(v => v.lang === langFilter)
+        : allVoices;
+
+    ttsVoice.innerHTML = '';
+    filtered.forEach((voice, i) => {
+        const opt = document.createElement('option');
+        opt.value = i;
+        opt.dataset.voiceName = voice.name;
+        opt.textContent = `${voice.name} (${voice.lang})${voice.default ? ' ★' : ''}`;
+        ttsVoice.appendChild(opt);
+    });
+
+    const defIdx = filtered.findIndex(v => v.default);
+    if (defIdx >= 0) ttsVoice.selectedIndex = defIdx;
+}
+
+function getSelectedVoice() {
+    const langFilter = ttsLangFilter.value;
+    const filtered   = langFilter ? allVoices.filter(v => v.lang === langFilter) : allVoices;
+    return filtered[ttsVoice.selectedIndex] || null;
+}
+
+loadVoices();
+if (synth.onvoiceschanged !== undefined) {
+    synth.onvoiceschanged = loadVoices;
+}
+
+ttsLangFilter.addEventListener('change', () => {
+    populateVoiceList(ttsLangFilter.value);
+});
+
+ttsVolume.addEventListener('input', () => { ttsVolumeVal.textContent = parseFloat(ttsVolume.value).toFixed(2); });
+ttsRate.addEventListener('input',   () => { ttsRateVal.textContent   = parseFloat(ttsRate.value).toFixed(1); });
+ttsPitch.addEventListener('input',  () => { ttsPitchVal.textContent  = parseFloat(ttsPitch.value).toFixed(2); });
+
+ttsSpeak.onclick = () => {
+    const text = ttsText.value.trim();
+    if (!text) {
+        setStatus('⚠️ Please enter some text first.', 'warn');
+        return;
+    }
+    synth.cancel();
+
+    currentUtterance = new SpeechSynthesisUtterance(text);
+    currentUtterance.voice  = getSelectedVoice();
+    currentUtterance.volume = parseFloat(ttsVolume.value);
+    currentUtterance.rate   = parseFloat(ttsRate.value);
+    currentUtterance.pitch  = parseFloat(ttsPitch.value);
+
+    currentUtterance.onstart = () => {
+        setStatus('🔊 Speaking…', 'speaking');
+        setBtns(true);
+        ttsSpeaking.classList.remove('hidden');
+    };
+
+    currentUtterance.onboundary = (e) => {
+        if (e.name === 'word') {
+            const word = text.substr(e.charIndex, e.charLength);
+            ttsCurrentWord.textContent = word;
+            ttsCurrentWord.classList.remove('word-pop');
+            void ttsCurrentWord.offsetWidth; // reflow
+            ttsCurrentWord.classList.add('word-pop');
+        }
+    };
+
+    currentUtterance.onpause = () => {
+        setStatus('⏸ Paused', 'paused');
+    };
+
+    currentUtterance.onresume = () => {
+        setStatus('🔊 Resumed…', 'speaking');
+    };
+
+    currentUtterance.onend = () => {
+        setStatus('✅ Done', 'done');
+        setBtns(false);
+        ttsSpeaking.classList.add('hidden');
+        ttsCurrentWord.textContent = '';
+    };
+
+    currentUtterance.onerror = (e) => {
+        setStatus(`❌ Error: ${e.error}`, 'error');
+        setBtns(false);
+        ttsSpeaking.classList.add('hidden');
+    };
+
+    synth.speak(currentUtterance);
+};
+
+ttsPauseBtn.onclick = () => {
+    if (synth.speaking && !synth.paused) synth.pause();
+    ttsPauseBtn.disabled  = true;
+    ttsResumeBtn.disabled = false;
+};
+
+ttsResumeBtn.onclick = () => {
+    if (synth.paused) synth.resume();
+    ttsPauseBtn.disabled  = false;
+    ttsResumeBtn.disabled = true;
+};
+
+ttsStopBtn.onclick = () => {
+    synth.cancel();
+    setBtns(false);
+    ttsSpeaking.classList.add('hidden');
+    ttsCurrentWord.textContent = '';
+    setStatus('⏹ Stopped', 'idle');
+};
+
+ttsResetBtn.onclick = () => {
+    ttsVolume.value = 1;   ttsVolumeVal.textContent = '1.00';
+    ttsRate.value   = 1;   ttsRateVal.textContent   = '1.0';
+    ttsPitch.value  = 1;   ttsPitchVal.textContent  = '1.00';
+    ttsLangFilter.value = '';
+    populateVoiceList('');
+    setStatus('↺ Settings reset', 'idle');
+};
+
+function setBtns(active) {
+    ttsSpeak.disabled     =  active;
+    ttsPauseBtn.disabled  = !active;
+    ttsStopBtn.disabled   = !active;
+    ttsResumeBtn.disabled = true;
+}
+
+function setStatus(msg, state) {
+    ttsStatus.textContent = msg;
+    ttsStatus.className = `tts-status tts-status--${state}`;
+
+}
